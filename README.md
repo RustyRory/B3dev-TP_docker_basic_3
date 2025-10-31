@@ -1,4 +1,4 @@
-# TP_docker_basic_2
+# TP_docker_basic_3
 
 Nom : Damien Paszkiewicz
 
@@ -106,3 +106,70 @@ uvicorn app:app --reload
 ```
 
 ![image.png](media/image(3).png)
+
+# Étape 1 — Dockerfile multi-stage
+
+Crée Dockerfile :
+
+```docker
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim AS base
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+FROM base AS deps
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+&& pip install --no-cache-dir -r requirements.txt
+FROM base AS runtime
+COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=deps /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+COPY [app.py](http://app.py/) .
+RUN adduser --disabled-password --gecos "" todo && chown -R todo:todo /app
+USER todo
+EXPOSE 8000
+ENV PORT=8000 TODO_DB_PATH=/app/data/todo.db
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD curl -fsS [http://127.0.0.1](http://127.0.0.1/):${PORT}/health || exit 1
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Construit :
+
+```bash
+~/$ sudo docker build -t todo-api:2.0.0 .             
+[+] Building 11.2s (15/15) FINISHED                                                                  docker:default
+ => [internal] load build definition from Dockerfile                                                           0.0s
+ => => transferring dockerfile: 801B                                                                           0.0s
+ => resolve image config for docker-image://docker.io/docker/dockerfile:1                                      0.7s
+ => CACHED docker-image://docker.io/docker/dockerfile:1@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff1  0.0s
+ => [internal] load metadata for docker.io/library/python:3.12-slim                                            0.5s
+ => [internal] load .dockerignore                                                                              0.0s
+ => => transferring context: 2B                                                                                0.0s
+ => [base 1/2] FROM docker.io/library/python:3.12-slim@sha256:e97cf9a2e84d604941d9902f00616db7466ff302af4b1c3  0.0s
+ => [internal] load build context                                                                              0.0s
+ => => transferring context: 1.86kB                                                                            0.0s
+ => CACHED [base 2/2] WORKDIR /app                                                                             0.0s
+ => [deps 1/2] COPY requirements.txt .                                                                         0.0s
+ => [deps 2/2] RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt                 7.9s
+ => [runtime 1/4] COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-pac  0.5s 
+ => [runtime 2/4] COPY --from=deps /usr/local/bin/uvicorn /usr/local/bin/uvicorn                               0.0s 
+ => [runtime 3/4] COPY app.py .                                                                                0.1s 
+ => [runtime 4/4] RUN adduser --disabled-password --gecos "" todo && chown -R todo:todo /app                   0.3s 
+ => exporting to image                                                                                         0.4s 
+ => => exporting layers                                                                                        0.4s 
+ => => writing image sha256:ede3e9176a0af1bf4b7879a0cd605b72ba31cff09cffeab2b2af82b2380b8689                   0.0s
+ => => naming to docker.io/library/todo-api:2.0.0   
+```
+
+Observe la taille de l’image ( docker image ls todo-api ). Compare avec une version single-stage (à construire en sous-tâche) et note la différence
+
+```bash
+~/Documents/B3dev/Docker/B3dev-TP_docker_basic_3$ sudo docker image ls todo-api
+REPOSITORY   TAG       IMAGE ID       CREATED              SIZE
+todo-api     2.0.0     ede3e9176a0a   About a minute ago   168MB
+```
+
+| Image | Taille approximative | Explication |
+| --- | --- | --- |
+| `todo-api:single` | ~250–300 MB | Toutes les dépendances et outils de build restent dans l’image |
+| `todo-api:2.0.0` (multi-stage) | ~120–150 MB | Seul le strict nécessaire est conservé |
+
